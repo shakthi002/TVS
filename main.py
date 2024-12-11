@@ -2,10 +2,11 @@ import os
 import google.generativeai as genai
 import pandas as pd
 import streamlit as st
-import st_audiorec
+import soundfile as sf  # Import soundfile for handling audio
+import speech_recognition as sr  # Import SpeechRecognition
 from db_operations import extract_tables_and_columns, get_table_schema, execute_sql_query
 from nlp_utils import extract_keywords_and_entities, precompute_schema_embeddings, find_relevant_tables
-import speech_recognition as sr
+
 # Load environment variables
 API_KEY = "AIzaSyA61I0rexXHdbAObWjlHWTaaLZLY1zQM7k"
 if not API_KEY:
@@ -27,24 +28,27 @@ def generate_dynamic_prompt(db_paths, question, relevant_tables):
     prompt += f"\nQuestion: '{question}'\nSQL:"
     return prompt
 
-# Function to handle voice input using streamlit-audiorec
+# Function to handle voice input using soundfile and SpeechRecognition
 def get_voice_input():
-    # Use streamlit-audiorec to record audio input
-    audio_data = st_audiorec.audio_input("Click to record your question", key="audio")
-    
-    if audio_data:
-        st.info("Audio received, processing...")
-        # Convert the audio into text using Google Speech API or other methods
-        try:
-            recognizer = sr.Recognizer()
-            audio = sr.AudioData(audio_data['bytes'], audio_data['sample_rate'], audio_data['sample_width'])
-            voice_text = recognizer.recognize_google(audio)
-            st.success(f"Recognized: {voice_text}")
-            return voice_text
-        except Exception as e:
-            st.error(f"Error recognizing speech: {e}")
-            return ""
-    else:
+    # Initialize recognizer
+    recognizer = sr.Recognizer()
+    mic = sr.Microphone()
+
+    with mic as source:
+        st.info("Listening for your voice input...")
+        recognizer.adjust_for_ambient_noise(source)
+        audio = recognizer.listen(source)
+
+    try:
+        # Recognize speech using Google Speech API
+        voice_text = recognizer.recognize_google(audio)
+        st.success(f"Recognized: {voice_text}")
+        return voice_text
+    except sr.UnknownValueError:
+        st.error("Sorry, I could not understand the audio.")
+        return ""
+    except sr.RequestError as e:
+        st.error(f"Could not request results from Google Speech service; {e}")
         return ""
 
 # Main Execution: Integrating both functionalities
