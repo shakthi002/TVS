@@ -1,8 +1,6 @@
 google-generativeai==0.8.3
 pandas==2.2.3
-SpeechRecognition==3.12.0
 spacy==3.8.2
 en_core_web_lg @ https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl
 scikit-learn==1.5.2
 streamlit==1.40.2
-PyAudio==0.2.14
