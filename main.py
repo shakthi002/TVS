@@ -2,13 +2,12 @@ import os
 import google.generativeai as genai
 import pandas as pd
 import streamlit as st
-import sounddevice as sd  # Import sounddevice for microphone input
-import numpy as np
-import io
-import soundfile as sf  # Import soundfile for handling audio files
 import speech_recognition as sr  # Import SpeechRecognition
 from db_operations import extract_tables_and_columns, get_table_schema, execute_sql_query
 from nlp_utils import extract_keywords_and_entities, precompute_schema_embeddings, find_relevant_tables
+from streamlit_webrtc import webrtc_streamer, AudioProcessorBase, WebRtcMode
+import numpy as np
+import io
 
 # Load environment variables
 API_KEY = "AIzaSyA61I0rexXHdbAObWjlHWTaaLZLY1zQM7k"
@@ -31,30 +30,18 @@ def generate_dynamic_prompt(db_paths, question, relevant_tables):
     prompt += f"\nQuestion: '{question}'\nSQL:"
     return prompt
 
-# Function to handle voice input using sounddevice (replacing PyAudio)
-def get_voice_input():
-    # Initialize recognizer
-    recognizer = sr.Recognizer()
+# Class to process audio input using WebRTC
+class AudioProcessor(AudioProcessorBase):
+    def __init__(self):
+        self.recognizer = sr.Recognizer()
 
-    # Record audio using sounddevice
-    fs = 16000  # Sampling frequency
-    duration = 5  # Duration in seconds
-
-    # Record audio using sounddevice
-    st.info("Listening for your voice input...")
-    audio_data = sd.rec(int(duration * fs), samplerate=fs, channels=1, dtype='int16')
-    sd.wait()  # Wait for recording to finish
-
-    # Convert numpy array to audio file
-    audio_file = io.BytesIO()
-    sf.write(audio_file, audio_data, fs, format='WAV')
-    audio_file.seek(0)
-
-    # Recognize speech using Google Speech API
-    with sr.AudioFile(audio_file) as source:
-        audio = recognizer.record(source)
+    def recv(self, frame: np.ndarray):
+        audio_data = np.frombuffer(frame, dtype=np.int16)  # Convert frame to audio data
+        
+        # Process audio with SpeechRecognition
+        audio = sr.AudioData(audio_data.tobytes(), 16000, 2)  # 16000 is the sample rate, 2 is number of channels
         try:
-            voice_text = recognizer.recognize_google(audio)
+            voice_text = self.recognizer.recognize_google(audio)
             st.success(f"Recognized: {voice_text}")
             return voice_text
         except sr.UnknownValueError:
@@ -63,27 +50,6 @@ def get_voice_input():
         except sr.RequestError as e:
             st.error(f"Could not request results from Google Speech service; {e}")
             return ""
-
-# Function to handle audio file input (if using a pre-recorded file)
-def process_audio_file(file_path):
-    try:
-        # Read the audio file using soundfile
-        audio_data, samplerate = sf.read(file_path)
-        # Save the audio to a temporary file for processing by speech_recognition
-        with open("temp_audio.wav", "wb") as f:
-            sf.write(f, audio_data, samplerate)
-
-        recognizer = sr.Recognizer()
-        with sr.AudioFile("temp_audio.wav") as source:
-            audio = recognizer.record(source)
-
-        # Recognize speech using Google Speech API
-        voice_text = recognizer.recognize_google(audio)
-        st.success(f"Recognized from file: {voice_text}")
-        return voice_text
-    except Exception as e:
-        st.error(f"Error processing the audio file: {e}")
-        return ""
 
 # Main Execution: Integrating both functionalities
 def main():
@@ -100,10 +66,13 @@ def main():
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
+    # WebRTC audio capture and processing
+    webrtc_streamer(key="audio", mode=WebRtcMode.SENDRECV, audio_processor_factory=AudioProcessor)
+
     # Button for voice input
     if st.button("Speak your SQL Question"):
-        # Get voice input and process
-        question = get_voice_input()
+        # Get voice input from WebRTC processor
+        question = st.session_state.get("voice_text", "")
 
         if question:
             # Append user's question to the chat history
