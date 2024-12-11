@@ -2,7 +2,7 @@ import os
 import google.generativeai as genai
 import pandas as pd
 import streamlit as st
-import soundfile as sf  # Import soundfile for handling audio
+import soundfile as sf  # Import soundfile for handling audio files
 import speech_recognition as sr  # Import SpeechRecognition
 from db_operations import extract_tables_and_columns, get_table_schema, execute_sql_query
 from nlp_utils import extract_keywords_and_entities, precompute_schema_embeddings, find_relevant_tables
@@ -28,7 +28,7 @@ def generate_dynamic_prompt(db_paths, question, relevant_tables):
     prompt += f"\nQuestion: '{question}'\nSQL:"
     return prompt
 
-# Function to handle voice input using soundfile and SpeechRecognition
+# Function to handle voice input using speech_recognition
 def get_voice_input():
     # Initialize recognizer
     recognizer = sr.Recognizer()
@@ -49,6 +49,27 @@ def get_voice_input():
         return ""
     except sr.RequestError as e:
         st.error(f"Could not request results from Google Speech service; {e}")
+        return ""
+
+# Function to handle audio file input (if using a pre-recorded file)
+def process_audio_file(file_path):
+    try:
+        # Read the audio file using soundfile
+        audio_data, samplerate = sf.read(file_path)
+        # Save the audio to a temporary file for processing by speech_recognition
+        with open("temp_audio.wav", "wb") as f:
+            sf.write(f, audio_data, samplerate)
+
+        recognizer = sr.Recognizer()
+        with sr.AudioFile("temp_audio.wav") as source:
+            audio = recognizer.record(source)
+
+        # Recognize speech using Google Speech API
+        voice_text = recognizer.recognize_google(audio)
+        st.success(f"Recognized from file: {voice_text}")
+        return voice_text
+    except Exception as e:
+        st.error(f"Error processing the audio file: {e}")
         return ""
 
 # Main Execution: Integrating both functionalities
