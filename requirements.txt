@@ -91,3 +91,4 @@ wrapt==1.17.0
 soundfile>=0.12.1
 librosa==0.10.0
 sounddevice==0.4.4
+streamlit-webrtc==0.40.0
