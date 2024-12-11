@@ -5,7 +5,7 @@ import streamlit as st
 import speech_recognition as sr  # Import SpeechRecognition
 from db_operations import extract_tables_and_columns, get_table_schema, execute_sql_query
 from nlp_utils import extract_keywords_and_entities, precompute_schema_embeddings, find_relevant_tables
-from streamlit_webrtc import webrtc_streamer, AudioProcessorBase, WebRtcMode
+from streamlit_webrtc import webrtc_streamer
 import numpy as np
 import io
 
