@@ -48,6 +48,7 @@ protobuf==5.29.1
 pyarrow==18.1.0
 pyasn1==0.6.1
 pyasn1_modules==0.4.1
+PyAudio==0.2.14
 pydantic==2.10.3
 pydantic_core==2.27.1
 pydeck==0.9.1
@@ -69,6 +70,7 @@ smmap==5.0.1
 spacy==3.8.2
 spacy-legacy==3.0.12
 spacy-loggers==1.0.5
+SpeechRecognition==3.12.0
 srsly==2.4.8
 streamlit==1.40.2
 tabulate==0.9.0
