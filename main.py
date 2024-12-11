@@ -2,6 +2,9 @@ import os
 import google.generativeai as genai
 import pandas as pd
 import streamlit as st
+import sounddevice as sd  # Import sounddevice for microphone input
+import numpy as np
+import io
 import soundfile as sf  # Import soundfile for handling audio files
 import speech_recognition as sr  # Import SpeechRecognition
 from db_operations import extract_tables_and_columns, get_table_schema, execute_sql_query
@@ -28,28 +31,38 @@ def generate_dynamic_prompt(db_paths, question, relevant_tables):
     prompt += f"\nQuestion: '{question}'\nSQL:"
     return prompt
 
-# Function to handle voice input using speech_recognition
+# Function to handle voice input using sounddevice (replacing PyAudio)
 def get_voice_input():
     # Initialize recognizer
     recognizer = sr.Recognizer()
-    mic = sr.Microphone()
 
-    with mic as source:
-        st.info("Listening for your voice input...")
-        recognizer.adjust_for_ambient_noise(source)
-        audio = recognizer.listen(source)
+    # Record audio using sounddevice
+    fs = 16000  # Sampling frequency
+    duration = 5  # Duration in seconds
 
-    try:
-        # Recognize speech using Google Speech API
-        voice_text = recognizer.recognize_google(audio)
-        st.success(f"Recognized: {voice_text}")
-        return voice_text
-    except sr.UnknownValueError:
-        st.error("Sorry, I could not understand the audio.")
-        return ""
-    except sr.RequestError as e:
-        st.error(f"Could not request results from Google Speech service; {e}")
-        return ""
+    # Record audio using sounddevice
+    st.info("Listening for your voice input...")
+    audio_data = sd.rec(int(duration * fs), samplerate=fs, channels=1, dtype='int16')
+    sd.wait()  # Wait for recording to finish
+
+    # Convert numpy array to audio file
+    audio_file = io.BytesIO()
+    sf.write(audio_file, audio_data, fs, format='WAV')
+    audio_file.seek(0)
+
+    # Recognize speech using Google Speech API
+    with sr.AudioFile(audio_file) as source:
+        audio = recognizer.record(source)
+        try:
+            voice_text = recognizer.recognize_google(audio)
+            st.success(f"Recognized: {voice_text}")
+            return voice_text
+        except sr.UnknownValueError:
+            st.error("Sorry, I could not understand the audio.")
+            return ""
+        except sr.RequestError as e:
+            st.error(f"Could not request results from Google Speech service; {e}")
+            return ""
 
 # Function to handle audio file input (if using a pre-recorded file)
 def process_audio_file(file_path):
