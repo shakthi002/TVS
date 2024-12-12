@@ -23,6 +23,9 @@ def generate_dynamic_prompt(db_paths, question, relevant_tables):
                 return f"Error fetching columns for table {table}: {columns}"
             if columns:
                 prompt += f"\nTable: {table}\nColumns: {', '.join(columns)}\n"
+    
+    prompt += "\nIn the 'WHERE' clause, use the 'LIKE' operator for text-based conditions (e.g., name, place, etc.) instead of '=' for more flexible matching.\n"
+    prompt += "Use general patterns where applicable, for example, '%<value>%' for partial matching or 'value%' for prefix matching.\n"
     prompt += f"\nQuestion: '{question}'\nSQL:"
     return prompt
 
