@@ -14,19 +14,50 @@ else:
 
 # Function to generate a dynamic prompt for SQL query generation based on relevant tables
 def generate_dynamic_prompt(db_paths, question, relevant_tables):
-    prompt = "You are an expert in converting English questions to SQL queries.\n\n"
-    prompt += "The SQL database contains the following relevant tables:\n"
+    prompt = (
+        "You are an expert in converting English questions to SQL queries. "
+        "Generate the most efficient and accurate SQL query for the provided question.\n\n"
+    )
+    prompt += (
+        "The SQL database contains the following relevant tables and their column structures:\n"
+    )
+    
     for db_path in db_paths:
         for table in relevant_tables:
             columns = get_table_schema(db_path, table)
             if isinstance(columns, str):  # Error occurred
                 return f"Error fetching columns for table {table}: {columns}"
             if columns:
-                prompt += f"\nTable: {table}\nColumns: {', '.join(columns)}\n"
+                prompt += (
+                    f"\nTable: {table}\n"
+                    f"Columns: {', '.join(columns)}\n"
+                    "Explain primary keys, foreign keys, and relationships, if known.\n"
+                )
     
-    prompt += "\nIn the 'WHERE' clause, use the 'LIKE' operator for text-based conditions (e.g., name, place, etc.) instead of '=' for more flexible matching.\n"
-    prompt += "Use general patterns where applicable, for example, '%<value>%' for partial matching or 'value%' for prefix matching.\n"
-    prompt += f"\nQuestion: '{question}'\nSQL:"
+    prompt += (
+        "\nGuidelines for SQL generation:\n"
+        "1. If filtering text-based fields, use the 'LIKE' operator for partial matching. For example:\n"
+        "   - Use '%<value>%' to search for records containing a specific value.\n"
+        "   - Use '<value>%' for prefix matching or '%<value>' for suffix matching.\n"
+        "2. If numeric comparisons are required, use operators like '=', '<', '<=', etc., appropriately.\n"
+        "3. Handle date/time fields using appropriate SQL functions like 'DATE()', 'MONTH()', or 'YEAR()', "
+        "based on the question context.\n"
+        "4. Join multiple tables when necessary, using primary/foreign key relationships, "
+        "and clearly specify join conditions.\n"
+        "5. Use aggregate functions like COUNT, SUM, AVG, MAX, or MIN if the question requires summarization or analysis.\n"
+        "6. Apply 'ORDER BY' for sorting results and 'LIMIT' for restricting the number of records if applicable.\n"
+        "7. Clearly alias columns and tables for readability in complex queries.\n"
+        "8. Use GROUP BY and HAVING clauses when aggregation and filtering on grouped data is needed.\n"
+        "9. Include NULL checks where applicable to ensure accurate filtering of results.\n"
+        "10. Ensure SQL queries are formatted properly for readability."
+    )
+    
+    prompt += (
+        "\n\nBased on this database structure and the provided guidelines, generate an SQL query "
+        "that answers the following question accurately and efficiently.\n"
+        f"Question: '{question}'\nSQL:"
+    )
+    
     return prompt
 
 # Main Execution: Integrating both functionalities
