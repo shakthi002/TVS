@@ -143,11 +143,13 @@ def main():
                         st.markdown("Query Results:")
                     st.dataframe(df)
                 else:
-                    st.session_state.messages.append({"role": "assistant", "content": "No results returned from the query."})
+                    with st.chat_message("user"):
+                     st.markdown(question)
                     st.info("No results returned from the query.")
             else:
                 error_message = "Failed to generate SQL query. Check API configuration or input."
-                st.session_state.messages.append({"role": "assistant", "content": error_message})
+                with st.chat_message("user"):
+                     st.markdown(question)
                 st.error(error_message)
 
         except Exception as e:
