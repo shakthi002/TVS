@@ -1,7 +1,6 @@
 import os
 import google.generativeai as genai
 import pandas as pd
-import streamlit as st
 from db_operations import extract_tables_and_columns, get_table_schema, execute_sql_query
 from nlp_utils import extract_keywords_and_entities, precompute_schema_embeddings, find_relevant_tables
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -10,13 +9,6 @@ import sqlite3
 # Load the model and tokenizer
 tokenizer = AutoTokenizer.from_pretrained("chatdb/natural-sql-7b")
 model = AutoModelForCausalLM.from_pretrained("chatdb/natural-sql-7b")
-
-# Load environment variables
-# API_KEY = "AIzaSyA61I0rexXHdbAObWjlHWTaaLZLY1zQM7k"
-# if not API_KEY:
-#     st.error("API key not found. Please set it in your environment variables.")
-# else:
-#     genai.configure(api_key=API_KEY)
 
 def get_all_tables(db_path):
     try:
@@ -65,28 +57,21 @@ def generate_dynamic_prompt(db_paths, question, relevant_tables):
     return prompt
 
 def main():
-    st.set_page_config(page_title="SQL Query Generator and Execution")
-    st.title("SQL Query Generator and Execution")
-    st.write("Generate SQL queries dynamically based on your database schema and a natural language question.")
+    print("Welcome to the SQL Query Generator and Execution Tool")
+    print("This tool generates SQL queries dynamically based on your database schema and a natural language question.")
 
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-
-    question = st.chat_input("Enter your SQL question:")
-    if question:
-        st.session_state.messages.append({"role": "user", "content": question})
+    while True:
+        question = input("\nEnter your SQL question (or type 'exit' to quit): ")
+        if question.lower() == 'exit':
+            print("Goodbye!")
+            break
 
         db_paths = ["db1.db"]
         missing_dbs = [db for db in db_paths if not os.path.exists(db)]
         if missing_dbs:
             error_message = f"The following database files do not exist: {', '.join(missing_dbs)}"
-            st.session_state.messages.append({"role": "assistant", "content": error_message})
-            st.error(error_message)
-            return
+            print(error_message)
+            continue
 
         try:
             keywords, entities = extract_keywords_and_entities(question)
@@ -95,12 +80,10 @@ def main():
             dynamic_prompt = generate_dynamic_prompt(db_paths, question, relevant_tables)
 
             if dynamic_prompt.startswith("Error"):
-                st.session_state.messages.append({"role": "assistant", "content": dynamic_prompt})
-                st.error(dynamic_prompt)
-                return
+                print(dynamic_prompt)
+                continue
 
-            combined_prompt = "\n".join([msg["content"] for msg in st.session_state.messages if msg["role"] == "user"]) + "\n" + dynamic_prompt
-            inputs = tokenizer(combined_prompt, return_tensors="pt")
+            inputs = tokenizer(dynamic_prompt, return_tensors="pt")
 
             outputs = model.generate(
                 **inputs, 
@@ -112,35 +95,20 @@ def main():
 
             if outputs is not None:
                 generated_sql = tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
+                print(f"\nGenerated SQL Query:\n{generated_sql}")
+
                 results, columns = execute_sql_query(generated_sql, db_paths)
 
                 if isinstance(results, list) and results:
                     df = pd.DataFrame(results, columns=columns)
-                    table_markdown = df.to_markdown(index=False)
-
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": f"Query Results:\n\n{table_markdown}"
-                    })
-
-                    with st.chat_message("user"):
-                        st.markdown(question)
-
-                    with st.chat_message("assistant"):
-                        st.markdown("Query Results:")
-                    st.dataframe(df)
+                    print(f"\nQuery Results:\n{df}")
                 else:
-                    st.session_state.messages.append({"role": "assistant", "content": "No results returned from the query."})
-                    st.info("No results returned from the query.")
+                    print("\nNo results returned from the query.")
             else:
-                error_message = "Failed to generate SQL query. Check API configuration or input."
-                st.session_state.messages.append({"role": "assistant", "content": error_message})
-                st.error(error_message)
+                print("\nFailed to generate SQL query. Check API configuration or input.")
 
         except Exception as e:
-            error_message = f"An error occurred: {e}"
-            st.session_state.messages.append({"role": "assistant", "content": error_message})
-            st.error(error_message)
+            print(f"\nAn error occurred: {e}")
 
 if __name__ == "__main__":
     main()
