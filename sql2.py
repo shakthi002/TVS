@@ -1,194 +1,205 @@
-import sqlite3
+import os
+import streamlit as st
+from langchain_pinecone import PineconeVectorStore
+from langchain.chains import ConversationalRetrievalChain
+from langchain.prompts.chat import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.embeddings.cohere import CohereEmbeddings
+from typing import List, Tuple, Dict
 
-# Define table schemas and data
-tables_data = {
-    "users": {
-        "schema": """CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL
-        )""",
-        "data": [
-            (1, "Alice", "alice@example.com"),
-            (2, "Bob", "bob@example.com"),
-            (3, "Charlie", "charlie@example.com"),
-            # Additional rows
-            (4, "David", "david@example.com"),
-            (5, "Eva", "eva@example.com")
-        ]
-    },
-    "products": {
-        "schema": """CREATE TABLE IF NOT EXISTS products (
-            id INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
-            price REAL NOT NULL
-        )""",
-        "data": [
-            (1, "Laptop", 1200.50),
-            (2, "Smartphone", 800.00),
-            (3, "Headphones", 150.75),
-            # Additional rows
-            (4, "Tablet", 500.00),
-            (5, "Smartwatch", 250.00)
-        ]
-    },
-    "orders": {
-        "schema": """CREATE TABLE IF NOT EXISTS orders (
-            id INTEGER PRIMARY KEY,
-            user_id INTEGER NOT NULL,
-            product_id INTEGER NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-            FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE
-        )""",
-        "data": [
-            (1, 1, 2),
-            (2, 2, 3),
-            (3, 3, 1),
-            # Additional rows
-            (4, 4, 5),
-            (5, 5, 4)
-        ]
-    },
-    "employees": {
-        "schema": """CREATE TABLE IF NOT EXISTS employees (
-            id INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
-            department TEXT NOT NULL
-        )""",
-        "data": [
-            (1, "Eve", "HR"),
-            (2, "Frank", "IT"),
-            (3, "Grace", "Finance"),
-            # Additional rows
-            (4, "Hannah", "Marketing"),
-            (5, "Ian", "Sales")
-        ]
-    },
-    "sales": {
-        "schema": """CREATE TABLE IF NOT EXISTS sales (
-            id INTEGER PRIMARY KEY,
-            product_id INTEGER NOT NULL,
-            amount INTEGER NOT NULL,
-            sale_date TEXT NOT NULL,
-            FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE
-        )""",
-        "data": [
-            (1, 1, 5, "2024-12-01"),
-            (2, 2, 2, "2024-12-02"),
-            (3, 3, 10, "2024-12-03"),
-            # Additional rows
-            (4, 4, 3, "2024-12-04"),
-            (5, 5, 7, "2024-12-05")
-        ]
-    },
-    "inventory": {
-        "schema": """CREATE TABLE IF NOT EXISTS inventory (
-            id INTEGER PRIMARY KEY,
-            product_id INTEGER NOT NULL,
-            stock_quantity INTEGER NOT NULL,
-            FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE
-        )""",
-        "data": [
-            (1, 1, 50),
-            (2, 2, 100),
-            (3, 3, 200),
-            # Additional rows
-            (4, 4, 75),
-            (5, 5, 150)
-        ]
-    },
-    "customers": {
-        "schema": """CREATE TABLE IF NOT EXISTS customers (
-            id INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
-            address TEXT NOT NULL
-        )""",
-        "data": [
-            (1, "John Doe", "123 Main St"),
-            (2, "Jane Smith", "456 Oak Rd"),
-            (3, "Samuel Green", "789 Pine Ln"),
-            # Additional rows
-            (4, "Alice Brown", "321 Elm St"),
-            (5, "Bob White", "654 Maple Ave")
-        ]
-    },
-    "transactions": {
-        "schema": """CREATE TABLE IF NOT EXISTS transactions (
-            id INTEGER PRIMARY KEY,
-            customer_id INTEGER NOT NULL,
-            amount REAL NOT NULL,
-            transaction_date TEXT NOT NULL,
-            FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE
-        )""",
-        "data": [
-            (1, 1, 1500.00, "2024-12-01"),
-            (2, 2, 800.00, "2024-12-02"),
-            (3, 3, 200.75, "2024-12-03"),
-            # Additional rows
-            (4, 4, 500.50, "2024-12-04"),
-            (5, 5, 300.30, "2024-12-05")
-        ]
-    },
-    "suppliers": {
-        "schema": """CREATE TABLE IF NOT EXISTS suppliers (
-            id INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
-            contact_info TEXT NOT NULL
-        )""",
-        "data": [
-            (1, "Tech Supplies", "contact@techsupplies.com"),
-            (2, "Gadget World", "info@gadgetworld.com"),
-            (3, "Electro Goods", "support@electrogoods.com"),
-            # Additional rows
-            (4, "Device Depot", "sales@devicedepot.com"),
-            (5, "Gizmo Solutions", "contact@gizmosolutions.com")
-        ]
-    }
-}
+# Set API Keys
+os.environ["COHERE_API_KEY"] = "your_cohere_api_key"
+os.environ["PINECONE_API_KEY"] = "your_pinecone_api_key"
 
-# Define which tables go into which databases (with no repeated tables)
-db_tables = {
-    "db1.db": ["users", "products", "orders", "employees", "sales"],  # db1 with 5 unique tables
-    "db2.db": ["inventory", "customers", "transactions", "suppliers"],  # db2 with 4 unique tables
-    "db3.db": ["orders", "sales", "employees", "transactions"],  # db3 with 4 unique tables
-}
+class ChatHistory:
+    """Manages chat history with proper context window management."""
+    def __init__(self, max_history: int = 5):
+        self.max_history = max_history
+        self.messages: List[Dict[str, str]] = []
+        self.conversation_pairs: List[Tuple[str, str]] = []
+    
+    def add_message(self, role: str, content: str):
+        """Add a message to the history with proper formatting."""
+        self.messages.append({"role": role, "content": content})
+        
+        # Update conversation pairs for the LLM context
+        if role == "user":
+            self._current_query = content
+        elif role == "assistant" and hasattr(self, '_current_query'):
+            self.conversation_pairs.append((self._current_query, content))
+            self._maintain_history_window()
+    
+    def _maintain_history_window(self):
+        """Maintain the conversation history within the specified window."""
+        if len(self.conversation_pairs) > self.max_history:
+            self.conversation_pairs = self.conversation_pairs[-self.max_history:]
+    
+    def get_messages(self) -> List[Dict[str, str]]:
+        """Get all messages for display."""
+        return self.messages
+    
+    def get_conversation_pairs(self) -> List[Tuple[str, str]]:
+        """Get conversation pairs for LLM context."""
+        return self.conversation_pairs
 
-# Function to create and populate a single database
-def create_and_populate_db(db_name, tables):
-    # Open a connection to the specific database
-    conn = sqlite3.connect(db_name)
-    cursor = conn.cursor()
-    cursor.execute("PRAGMA foreign_keys = ON;")  # Enable foreign key enforcement
+def initialize_embeddings() -> CohereEmbeddings:
+    """Initialize Cohere embeddings with improved configuration."""
+    return CohereEmbeddings(
+        model="embed-english-v3.0",
+        cohere_api_key=os.environ["COHERE_API_KEY"]
+    )
 
-    print(f"Creating tables in {db_name}...")
+def create_chat_prompt() -> ChatPromptTemplate:
+    """Create a default chat prompt template."""
+    context = """You are a helpful AI assistant. Your role is to:
 
-    # Iterate over the tables in the current database
-    for table in tables:
-        try:
-            # Check if the table exists before attempting to create it
-            cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}';")
-            if cursor.fetchone() is None:
-                print(f"Creating table: {table} in {db_name}")
-                cursor.execute(tables_data[table]["schema"])
-            else:
-                print(f"Table '{table}' already exists in {db_name}. Skipping creation.")
+1. Understand user questions and requirements clearly
+2. Provide detailed, relevant information
+3. Be concise yet comprehensive
+4. Use clear formatting for better readability
 
-            # Insert data into the table
-            print(f"Inserting data into {table}...")
-            cursor.executemany(
-                f"INSERT INTO {table} VALUES ({', '.join(['?'] * len(tables_data[table]['data'][0]))})",
-                tables_data[table]["data"],
-            )
+Guidelines:
+- Ask clarifying questions when needed
+- Provide specific examples when relevant
+- Format responses clearly using markdown
+- Keep responses focused and on-topic
+- Use simple, accessible language
 
-            print(f"Data inserted into {table} in {db_name}")
-        except sqlite3.OperationalError as e:
-            print(f"Error creating or inserting into {table} in {db_name}: {e}")
+Remember to:
+- Be friendly and professional
+- Stay factual and accurate
+- Respect user privacy
+- Admit when you don't know something
+"""
+    
+    system_template = """Use the following context for responses:
+    {context}
 
-    # Commit the changes and close the connection
-    conn.commit()
-    conn.close()
-    print(f"Database '{db_name}' created with tables: {', '.join(tables)}")
+    Chat History Reference: {chat_history}
 
-# Create databases and populate them with tables and data
-for db_name, tables in db_tables.items():
-    create_and_populate_db(db_name, tables)
+    Guidelines:
+    - Provide responses based on the current query and context
+    - Reference chat history when relevant
+    - Focus on the current user's needs
+    - Be clear and concise
+    """
+    
+    human_template = """User Query: {question}
+    
+    Please provide a response considering the context and previous conversation."""
+    
+    messages = [
+        SystemMessagePromptTemplate.from_template(system_template),
+        HumanMessagePromptTemplate.from_template(human_template)
+    ]
+    
+    return ChatPromptTemplate.from_messages(messages)
+
+def initialize_retrieval_chain() -> ConversationalRetrievalChain:
+    """Initialize the conversational retrieval chain with improved configuration."""
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-1.5-flash",
+        google_api_key="your_google_api_key",
+        temperature=0.3,
+        max_tokens=1524,
+        timeout=45,
+        max_retries=3,
+    )
+    
+    embeddings = initialize_embeddings()
+    retriever = PineconeVectorStore.from_existing_index(
+        "your_index_name",
+        embeddings
+    ).as_retriever(
+        search_kwargs={"k": 5}
+    )
+    
+    return ConversationalRetrievalChain.from_llm(
+        llm=llm,
+        retriever=retriever,
+        combine_docs_chain_kwargs={"prompt": create_chat_prompt()},
+        chain_type="stuff",
+        return_source_documents=False,
+        verbose=True
+    )
+
+def run_query(qa_chain: ConversationalRetrievalChain, query: str, chat_history: List[Tuple[str, str]]) -> str:
+    """Run a query through the QA chain with error handling."""
+    try:
+        result = qa_chain({
+            "question": query, 
+            "chat_history": chat_history
+        })
+        return result["answer"]
+    except Exception as e:
+        raise Exception(f"Error processing query: {str(e)}")
+
+def main():
+    st.set_page_config(
+        page_title="AI Assistant",
+        page_icon="💬",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    
+    st.title("💬 AI Assistant")
+    
+    st.markdown("""
+    Welcome! I'm your AI assistant. I can help you:
+    - Answer your questions
+    - Provide detailed information
+    - Offer suggestions and recommendations
+    - Assist with various topics
+    
+    How can I help you today?
+    """)
+    
+    # Initialize session state
+    if "qa_chain" not in st.session_state:
+        st.session_state.qa_chain = None
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = ChatHistory(max_history=5)
+
+    # Initialize chain if not already initialized
+    if st.session_state.qa_chain is None:
+        with st.spinner("Initializing AI assistant..."):
+            try:
+                st.session_state.qa_chain = initialize_retrieval_chain()
+                st.success("Ready to help!")
+            except Exception as e:
+                st.error(f"Error initializing system: {e}")
+                return
+
+    # Display chat messages
+    for message in st.session_state.chat_history.get_messages():
+        with st.chat_message(message["role"], avatar="💬" if message["role"] == "assistant" else None):
+            st.write(message["content"])
+
+    # Chat input
+    query = st.chat_input("Ask me anything...")
+    
+    if query:
+        # Add user message
+        st.session_state.chat_history.add_message("user", query)
+        with st.chat_message("user"):
+            st.write(query)
+        
+        # Generate and display response
+        with st.chat_message("assistant", avatar="💬"):
+            with st.spinner("Thinking..."):
+                try:
+                    response = run_query(
+                        st.session_state.qa_chain,
+                        query,
+                        st.session_state.chat_history.get_conversation_pairs()
+                    )
+                    st.write(response)
+                    st.session_state.chat_history.add_message("assistant", response)
+
+                except Exception as e:
+                    error_message = f"I apologize, but I encountered an error: {e}. Please try asking your question differently."
+                    st.error(error_message)
+                    st.session_state.chat_history.add_message("assistant", error_message)
+
+if __name__ == "__main__":
+    main()
